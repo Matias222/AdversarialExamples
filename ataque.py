@@ -5,8 +5,10 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+from PIL import Image
 
-epsilons = [0, .05, .1, .15, .2, .25, .3]
+epsilons = [0, .05]#, .1, .15, .2, .25, .3]
 pretrained_model = "lenet_mnist_model.pth"
 # Set random seed for reproducibility
 torch.manual_seed(42)
@@ -208,17 +210,26 @@ plt.ylabel("Accuracy")
 plt.show()
 
 cnt = 0
-plt.figure(figsize=(8,10))
+
 for i in range(len(epsilons)):
+    eps_val = epsilons[i]
+    folder_name = f"epsilon_{eps_val:.3f}"
+    
+    # Create the folder if it doesn't exist
+    os.makedirs(folder_name, exist_ok=True)
+
     for j in range(len(examples[i])):
         cnt += 1
-        plt.subplot(len(epsilons),len(examples[0]),cnt)
-        plt.xticks([], [])
-        plt.yticks([], [])
-        if j == 0:
-            plt.ylabel(f"Eps: {epsilons[i]}", fontsize=14)
-        orig,adv,ex = examples[i][j]
-        plt.title(f"{orig} -> {adv}")
-        plt.imshow(ex, cmap="gray")
-plt.tight_layout()
-plt.show()
+        orig_label, adv_label, ex_image = examples[i][j]
+
+        # Convert image to 0-255 and uint8 if needed
+        if isinstance(ex_image, torch.Tensor):
+            ex_image = ex_image.detach().cpu().numpy()
+
+        # Scale if it's in [0,1] float
+        if ex_image.max() <= 1.0:
+            ex_image = (ex_image * 255).astype(np.uint8)
+
+        # Save image
+        img = Image.fromarray(ex_image.squeeze())  # squeeze in case of shape (1,H,W)
+        img.save(os.path.join(folder_name, f"{orig_label}_to_{adv_label}_{j}.png"))
