@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 import os
 from PIL import Image
 
-epsilons = [0, .05, .1, .15, .2, .25, .3]
+#epsilons = [0.4, .05]#, .1, .15, .2, .25, .3]
+
+epsilons = [0.0045]
 pretrained_model = "lenet_mnist_model.pth"
 # Set random seed for reproducibility
 torch.manual_seed(42)
@@ -108,52 +110,86 @@ def denorm(batch, mean=[0.1307], std=[0.3081]):
 # successful adversarial examples to be visualized later.
 #
 
+def project(imagen_original, imagen_adversarial):
+    
+    radio=0.075
+
+    lower_bound = imagen_original - radio
+    upper_bound = imagen_original + radio
+    projected = torch.clamp(imagen_adversarial, min=lower_bound, max=upper_bound)
+    
+    return projected
+
 def test( model, device, test_loader, epsilon ):
 
     # Accuracy counter
     correct = 0
     adv_examples = []
+    iteracion=0
+
+    print("Total test set",len(test_loader))
 
     # Loop over all examples in test set
     for data, target in test_loader:
 
-        # Send the data and label to the device
-        data, target = data.to(device), target.to(device)
+        print("Iteracion",iteracion)
 
-        # Set requires_grad attribute of tensor. Important for Attack
-        data.requires_grad = True
+        data_iteracion=data
+        iteracion+=1
 
-        # Forward pass the data through the model
-        output = model(data)
-        init_pred = output.max(1, keepdim=True)[1] # get the index of the max log-probability
+        #if(iteracion==1000): break
 
-        # If the initial prediction is wrong, don't bother attacking, just move on
-        if init_pred.item() != target.item():
-            continue
+        for k in range(35):
 
-        # Calculate the loss
-        loss = F.nll_loss(output, target)
+            #print("Iteracion",k)
 
-        # Zero all existing gradients
-        model.zero_grad()
+            # Send the data and label to the device
+            data_en_device, target = data_iteracion.to(device), target.to(device)
 
-        # Calculate gradients of model in backward pass
-        loss.backward()
+            # Set requires_grad attribute of tensor. Important for Attack
+            data_en_device.requires_grad = True
 
-        # Collect ``datagrad``
-        data_grad = data.grad.data
+            # Forward pass the data through the model
+            output = model(data_en_device)
+            
+            if(k==0):
+            
+                init_pred = output.max(1, keepdim=True)[1] # get the index of the max log-probability
 
-        # Restore the data to its original scale
-        data_denorm = denorm(data)
+                # If the initial prediction is wrong, don't bother attacking, just move on
+                if (init_pred.item() != target.item()): break
 
-        # Call FGSM Attack
-        perturbed_data = fgsm_attack(data_denorm, epsilon, data_grad)
+            # Calculate the loss
+            loss = F.nll_loss(output, target)
 
-        # Reapply normalization
-        perturbed_data_normalized = transforms.Normalize((0.1307,), (0.3081,))(perturbed_data)
+            # Zero all existing gradients
+            model.zero_grad()
+
+            # Calculate gradients of model in backward pass
+            loss.backward()
+
+            # Restore the data to its original scale
+            data_denorm = denorm(data_en_device)
+
+            imagen_original = data_denorm
+            perturbed_image = data_denorm
+
+            data_grad = data_en_device.grad.data
+
+            sign_data_grad = data_grad.sign()
+            perturbed_image = perturbed_image + epsilon*sign_data_grad
+
+            perturbed_image = project(imagen_original,perturbed_image)
+
+            perturbed_data = torch.clamp(perturbed_image, 0, 1)
+
+            perturbed_data_normalized = transforms.Normalize((0.1307,), (0.3081,))(perturbed_data)
+
+            data_iteracion = perturbed_data_normalized.detach()
+
 
         # Re-classify the perturbed image
-        output = model(perturbed_data_normalized)
+        output = model(data_iteracion.to(device))
 
         # Check for success
         final_pred = output.max(1, keepdim=True)[1] # get the index of the max log-probability
@@ -213,7 +249,7 @@ cnt = 0
 
 for i in range(len(epsilons)):
     eps_val = epsilons[i]
-    folder_name = f"epsilon_{eps_val:.3f}"
+    folder_name = f"final_epsilon_{eps_val:.4f}"
     
     # Create the folder if it doesn't exist
     os.makedirs(folder_name, exist_ok=True)
